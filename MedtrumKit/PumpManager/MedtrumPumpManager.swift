@@ -160,6 +160,10 @@ public class MedtrumPumpManager: DeviceManager {
         state.debugDescription
     }
 
+    public static var issuableAlerts: [IssuableAlert] {
+        MedtrumAlert.issuable.map(\.issuableAlert)
+    }
+
     public func acknowledgeAlert(alertIdentifier _: LoopKit.Alert.AlertIdentifier) async throws {
         // No alerts to acknowledge for Medtrum
     }

@@ -10,6 +10,18 @@ enum MedtrumAlert {
     case reservoirEmptyNotification
     case baseResetNotification
 
+    // Every alert MedtrumPumpManager issues; associated values don't affect identifier or level.
+    static let issuable: [MedtrumAlert] = [
+        .patchExpiredNotification(after: 0),
+        .lowReservoir(level: 0),
+        .patchDailyMaxNotification,
+        .patchHourlyMaxNotification,
+        .occlusionNotification,
+        .patchFaultNotification,
+        .reservoirEmptyNotification,
+        .baseResetNotification
+    ]
+
     var title: String? {
         switch self {
         case .patchDailyMaxNotification:
@@ -52,7 +64,37 @@ enum MedtrumAlert {
             foregroundContent: content,
             backgroundContent: content,
             trigger: trigger,
+            interruptionLevel: interruptionLevel,
         )
+    }
+
+    var interruptionLevel: Alert.InterruptionLevel {
+        switch self {
+        case .baseResetNotification,
+             .occlusionNotification,
+             .patchFaultNotification,
+             .reservoirEmptyNotification:
+            return .critical
+        case .lowReservoir,
+             .patchDailyMaxNotification,
+             .patchHourlyMaxNotification:
+            return .timeSensitive
+        case .patchExpiredNotification:
+            return .active
+        }
+    }
+
+    var issuableAlert: IssuableAlert {
+        IssuableAlert(identifier: identifier.alertIdentifier, interruptionLevel: interruptionLevel, title: issuableTitle)
+    }
+
+    private var issuableTitle: String {
+        switch self {
+        case .lowReservoir:
+            return String(localized: "Reservoir low", comment: "Title of the low reservoir alert when listed without a level")
+        default:
+            return title ?? alertContent.title
+        }
     }
 
     private static let managerIdentifier = "Medtrum"
@@ -76,7 +118,7 @@ enum MedtrumAlert {
         case .occlusionNotification:
             return Alert.Identifier(
                 managerIdentifier: MedtrumAlert.managerIdentifier,
-                alertIdentifier: "com.nightscout.medtrumkit.patch-occlussion"
+                alertIdentifier: "com.nightscout.medtrumkit.patch-occlusion"
             )
         case .patchFaultNotification:
             return Alert.Identifier(
