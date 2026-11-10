@@ -11,7 +11,7 @@ enum MedtrumAlert {
     case baseResetNotification
 
     // Every alert MedtrumPumpManager issues; associated values don't affect identifier or level.
-    static let issuable: [MedtrumAlert] = [
+    static let cataloged: [MedtrumAlert] = [
         .patchExpiredNotification(after: 0),
         .lowReservoir(level: 0),
         .patchDailyMaxNotification,
@@ -84,11 +84,11 @@ enum MedtrumAlert {
         }
     }
 
-    var issuableAlert: IssuableAlert {
-        IssuableAlert(identifier: identifier.alertIdentifier, interruptionLevel: interruptionLevel, title: issuableTitle)
+    var catalogEntry: AlertCatalogEntry {
+        AlertCatalogEntry(identifier: identifier.alertIdentifier, interruptionLevel: interruptionLevel, title: catalogTitle)
     }
 
-    private var issuableTitle: String {
+    private var catalogTitle: String {
         switch self {
         case .lowReservoir:
             return String(localized: "Reservoir low", comment: "Title of the low reservoir alert when listed without a level")

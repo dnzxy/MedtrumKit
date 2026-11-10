@@ -160,8 +160,8 @@ public class MedtrumPumpManager: DeviceManager {
         state.debugDescription
     }
 
-    public static var issuableAlerts: [IssuableAlert] {
-        MedtrumAlert.issuable.map(\.issuableAlert)
+    public static var alertCatalog: [AlertCatalogEntry] {
+        MedtrumAlert.cataloged.map(\.catalogEntry)
     }
 
     public func acknowledgeAlert(alertIdentifier _: LoopKit.Alert.AlertIdentifier) async throws {
