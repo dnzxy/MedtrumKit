@@ -114,6 +114,16 @@ final class DeviceHandoffTests: XCTestCase {
         XCTAssertNil(manager.rawState["refusesSessions"])
     }
 
+    func testAReleaseThatCameWithTheOldRefusalIsUndone() {
+        var raw = activeState().rawValue
+        raw["controlReleased"] = true
+        raw["refusesSessions"] = true
+        XCTAssertFalse(MedtrumPumpState(rawValue: raw).controlReleased)
+
+        raw["refusesSessions"] = nil
+        XCTAssertTrue(MedtrumPumpState(rawValue: raw).controlReleased, "a real hand-off stays released")
+    }
+
     // MARK: Odometer
 
     func testDeliveredUnitsAreTheReservoirUsedInWholePulses() throws {

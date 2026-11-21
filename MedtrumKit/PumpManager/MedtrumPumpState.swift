@@ -71,6 +71,10 @@ public class MedtrumPumpState: RawRepresentable {
         notificationAfterActivation = rawValue["notificationAfterActivation"] as? TimeInterval ?? .hours(72)
         reservoirReadAt = rawValue["reservoirReadAt"] as? Date
         controlReleased = rawValue["controlReleased"] as? Bool ?? false
+        if rawValue["refusesSessions"] as? Bool == true {
+            // an earlier build released the patch when it wrongly refused it; that was no hand-off
+            controlReleased = false
+        }
         sharedWithAnotherController = rawValue["sharedWithAnotherController"] as? Bool ?? false
         supersedingUntil = rawValue["supersedingUntil"] as? Date
 
