@@ -54,6 +54,8 @@ enum StateSyncer {
                 pumpManager.emitAlert(alertType: .lowReservoir(level: reservoir))
             }
 
+            state.reservoirReadAt = syncDate
+
             if state.reservoir != reservoir {
                 state.reservoir = reservoir
 
@@ -135,6 +137,8 @@ enum StateSyncer {
                 state.basalState = .active
             }
         }
+
+        pumpManager.noteObservedDelivery(basal: syncResponse.basal, bolus: syncResponse.bolus)
 
         if let prime = syncResponse.primeProgress {
             state.primeProgress = prime

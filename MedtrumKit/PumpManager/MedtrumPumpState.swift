@@ -69,6 +69,14 @@ public class MedtrumPumpState: RawRepresentable {
         reservoir = rawValue["reservoir"] as? Double ?? 0
         battery = rawValue["battery"] as? Double ?? 0
         notificationAfterActivation = rawValue["notificationAfterActivation"] as? TimeInterval ?? .hours(72)
+        reservoirReadAt = rawValue["reservoirReadAt"] as? Date
+        controlReleased = rawValue["controlReleased"] as? Bool ?? false
+        sharedWithAnotherController = rawValue["sharedWithAnotherController"] as? Bool ?? false
+        supersedingUntil = rawValue["supersedingUntil"] as? Date
+        refusesSessions = rawValue["refusesSessions"] as? Bool ?? false
+        foreignSessionDetectedAt = rawValue["foreignSessionDetectedAt"] as? Date
+        lastOwnDeliveryCommandAt = rawValue["lastOwnDeliveryCommandAt"] as? Date
+        lastSeenBasalSequence = rawValue["lastSeenBasalSequence"] as? Double
 
         if let expiryModeRaw = rawValue["expiryMode"] as? ExpiryMode.RawValue {
             expiryMode = ExpiryMode(rawValue: expiryModeRaw) ?? .default
@@ -202,6 +210,14 @@ public class MedtrumPumpState: RawRepresentable {
         value["expiryMode"] = expiryMode.rawValue
         value["notificationAfterActivation"] = notificationAfterActivation
         value["useSilentTones"] = useSilentTones
+        value["reservoirReadAt"] = reservoirReadAt
+        value["controlReleased"] = controlReleased
+        value["sharedWithAnotherController"] = sharedWithAnotherController
+        value["supersedingUntil"] = supersedingUntil
+        value["refusesSessions"] = refusesSessions
+        value["foreignSessionDetectedAt"] = foreignSessionDetectedAt
+        value["lastOwnDeliveryCommandAt"] = lastOwnDeliveryCommandAt
+        value["lastSeenBasalSequence"] = lastSeenBasalSequence
 
         if let previousPatch = previousPatch {
             do {
@@ -213,6 +229,16 @@ public class MedtrumPumpState: RawRepresentable {
     }
 
     public var isOnboarded: Bool
+
+    // Handing the patch to another controller (MedtrumPumpManager+DeviceHandoff)
+    public var reservoirReadAt: Date?
+    public var controlReleased = false
+    public var sharedWithAnotherController = false
+    public var supersedingUntil: Date?
+    public var refusesSessions = false
+    public var foreignSessionDetectedAt: Date?
+    public var lastOwnDeliveryCommandAt: Date?
+    public var lastSeenBasalSequence: Double?
     public var insulinType: InsulinType?
     public var lastSync: Date
     public var pumpSN: Data {

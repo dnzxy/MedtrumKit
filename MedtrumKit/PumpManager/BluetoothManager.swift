@@ -44,9 +44,19 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
     /// validating restoration, which happens once at creation and therefore before anything can
     /// change it; `pumpManager` is the authority everywhere else.
     private let identifierAtLaunch: UUID?
+    private let releasedAtLaunch: Bool
 
-    init(knownPeripheralIdentifier: UUID?) {
+    /// Released to another controller, or refusing after one used the patch: connect to nothing.
+    private var mayConnect: Bool {
+        guard let state = pumpManager?.state else {
+            return !releasedAtLaunch
+        }
+        return !state.controlReleased && !state.refusesSessions
+    }
+
+    init(knownPeripheralIdentifier: UUID?, released: Bool = false) {
         identifierAtLaunch = knownPeripheralIdentifier
+        releasedAtLaunch = released
 
         super.init()
 
@@ -163,6 +173,10 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
 
     /// Must be called on `managerQueue`.
     private func scheduleReconnect() {
+        guard mayConnect else {
+            return
+        }
+
         // `ensureConnectedOnQueue` can retrieve the peripheral from stored identifier
         guard peripheral != nil || pumpManager?.state.peripheralIdentifier != nil else {
             // otherwise we would be retrying a scan, which doesn't work in the background
@@ -213,6 +227,12 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
     }
 
     private func ensureConnectedOnQueue(_ completion: @escaping (MedtrumConnectError?) -> Void) {
+        guard mayConnect else {
+            logger.info("Not connecting: another controller has the patch")
+            report(.controlReleased, to: completion)
+            return
+        }
+
         // Wait on the connect already in flight instead of failing. A connect owns the link for as
         // long as auth, synchronize and subscribe take, and anything the loop or the user asks for
         // in that window used to be turned away outright - a bolus issued in the same second as a
@@ -393,6 +413,17 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
         }
     }
 
+    /// Drops the link for another controller, keeping the identifier for when we take the patch back.
+    func disconnectForRelease() {
+        managerQueue.sync {
+            forcedDisconnect = true
+            if let peripheral, peripheral.state != .disconnected {
+                manager.cancelPeripheralConnection(peripheral)
+            }
+            clearPeripheralOnQueue(forgetIdentifier: false)
+        }
+    }
+
     /// Forgets the device entirely - used when the patch is deactivated and when the pump base is
     /// swapped for another one. It also drops the stored identifier, so the next connect has to
     /// find the base by scanning, which is fine: both of those are foreground activities.
@@ -531,8 +562,8 @@ extension BluetoothManager {
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         logger.info("Connected to pump: \(peripheral.name ?? "<NO_NAME>")!")
 
-        if forcedDisconnect {
-            logger.info("Dropping a connection that landed after a forced disconnect")
+        if forcedDisconnect || !mayConnect {
+            logger.info("Dropping a connection that landed after a forced disconnect or a release")
             central.cancelPeripheralConnection(peripheral)
             return
         }
@@ -616,6 +647,12 @@ extension BluetoothManager {
 
         // `pumpManager` is usually still nil here - see `identifierAtLaunch`.
         let knownIdentifier = pumpManager?.state.peripheralIdentifier ?? identifierAtLaunch
+
+        guard mayConnect else {
+            logger.info("Dropping restored peripherals: another controller has the patch")
+            peripherals.forEach { centralManager.cancelPeripheralConnection($0) }
+            return
+        }
 
         for peripheral in peripherals {
             if peripheral.services?.first(where: { $0.uuid == CBUUID.SERVICE_UUID }) == nil {

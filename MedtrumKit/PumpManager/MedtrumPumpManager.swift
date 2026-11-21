@@ -19,7 +19,7 @@ public class MedtrumPumpManager: DeviceManager {
 
     public let managerIdentifier: String = "Medtrum"
 
-    private let log = MedtrumLogger(category: "MedtrumPumpManager")
+    let log = MedtrumLogger(category: "MedtrumPumpManager")
 
     public let pumpDelegate = WeakSynchronizedDelegate<PumpManagerDelegate>()
     private let statusObservers = WeakSynchronizedSet<PumpManagerStatusObserver>()
@@ -44,10 +44,13 @@ public class MedtrumPumpManager: DeviceManager {
     }
 
     var bluetooth: BluetoothManager!
-    init(state: MedtrumPumpState) {
+    /// `withBluetooth` false is for tests, which can't create a restoring central manager.
+    init(state: MedtrumPumpState, withBluetooth: Bool = true) {
         self.state = state
         oldState = MedtrumPumpState(rawValue: state.rawValue)
-        bluetooth = BluetoothManager(knownPeripheralIdentifier: state.peripheralIdentifier)
+        if withBluetooth {
+            bluetooth = BluetoothManager(knownPeripheralIdentifier: state.peripheralIdentifier, released: state.controlReleased)
+        }
         refreshLogDeviceIdentifier()
 
         #if os(iOS)
@@ -65,7 +68,7 @@ public class MedtrumPumpManager: DeviceManager {
             )
         #endif
 
-        bluetooth.pumpManager = self
+        bluetooth?.pumpManager = self
         MedtrumLogger.pumpManager = self
     }
 
@@ -89,6 +92,13 @@ public class MedtrumPumpManager: DeviceManager {
 
     public required convenience init?(rawState: RawStateValue) {
         self.init(state: MedtrumPumpState(rawValue: rawState))
+    }
+
+    public required convenience init?(adopting configuration: SharedDeviceConfiguration, localState: [String: Any]?) {
+        guard let state = MedtrumPumpManager.adoptedState(from: configuration, localState: localState) else {
+            return nil
+        }
+        self.init(state: state)
     }
 
     public var isOnboarded: Bool {
@@ -403,6 +413,8 @@ public extension MedtrumPumpManager {
                 return
             }
 
+            self.noteOwnDeliveryCommand()
+
             let writeResult = self.bluetooth.write(SetBolusPacket(bolusAmount: units))
             if case let .failure(error) = writeResult {
                 self.log.error("Failed to write: \(error.localizedDescription)")
@@ -451,6 +463,8 @@ public extension MedtrumPumpManager {
                 completion(.failure(.communication(error)))
                 return
             }
+
+            self.noteOwnDeliveryCommand()
 
             let result = self.bluetooth.write(CancelBolusPacket())
             if case let .failure(error) = result {
@@ -520,6 +534,7 @@ public extension MedtrumPumpManager {
 
             if self.state.basalState == .tempBasal {
                 // Need to cancel temp basal first before setting temp basal
+                self.noteOwnDeliveryCommand()
                 let cancelResult = self.bluetooth.write(CancelTempBasalPacket())
                 if case let .failure(error) = cancelResult {
                     self.log.error("Failed to cancel temp basal: \(error.localizedDescription)")
@@ -541,6 +556,7 @@ public extension MedtrumPumpManager {
             }
 
             let packet = SetTempBasalPacket(rate: unitsPerHour, duration: duration)
+            self.noteOwnDeliveryCommand()
             let tempBasalResult = self.bluetooth.write(packet)
 
             if case let .failure(error) = tempBasalResult {
@@ -609,6 +625,8 @@ public extension MedtrumPumpManager {
                 return
             }
 
+            self.noteOwnDeliveryCommand()
+
             let result = self.bluetooth.write(SuspendPumpPacket(duration: duration))
             if case let .failure(error) = result {
                 self.log.error("Failed to suspend delivery: \(error.localizedDescription)")
@@ -643,6 +661,8 @@ public extension MedtrumPumpManager {
                 completion(error)
                 return
             }
+
+            self.noteOwnDeliveryCommand()
 
             let response = self.bluetooth.write(ResumePumpPacket())
             if case let .failure(error) = response {
@@ -691,6 +711,7 @@ public extension MedtrumPumpManager {
 
             let schedule = BasalSchedule(entries: items)
             let packet = SetBasalProfilePacket(basalProfile: schedule.toData())
+            self.noteOwnDeliveryCommand()
             let result = self.bluetooth.write(packet)
 
             if case let .failure(error) = result {
@@ -830,6 +851,7 @@ public extension MedtrumPumpManager {
                 currentTDD: 0,
                 basalProfile: self.state.basalSchedule.toData()
             )
+            self.noteOwnDeliveryCommand()
             let result = self.bluetooth.write(packet)
             switch result {
             case let .failure(error):
@@ -1051,6 +1073,8 @@ public extension MedtrumPumpManager {
                 return
             }
 
+            self.noteOwnDeliveryCommand()
+
             let resumeResult = self.bluetooth.write(ResumePumpPacket())
             if case let .failure(error) = resumeResult {
                 self.log.error("Failed to resume patch: \(error)")
@@ -1247,7 +1271,7 @@ public extension MedtrumPumpManager {
         return [NewPumpEvent.bolus(dose: dose)]
     }
 
-    private func ensureConnectedAndActive(_ completion: @escaping (MedtrumConnectError?) -> Void) {
+    func ensureConnectedAndActive(_ completion: @escaping (MedtrumConnectError?) -> Void) {
         guard !state.pumpState.isSetup else {
             log.warning("No active patch, failing immediately")
             completion(.failedToFindDevice)
@@ -1255,12 +1279,12 @@ public extension MedtrumPumpManager {
         }
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self else {
+            guard let self, let bluetooth = self.bluetooth else {
                 completion(.failedToFindDevice)
                 return
             }
 
-            self.bluetooth.ensureConnected(completion)
+            bluetooth.ensureConnected(completion)
         }
     }
 
@@ -1291,7 +1315,7 @@ public extension MedtrumPumpManager {
     }
 
     /// The current temp basal (if any), finalized as having stopped at `endedAt`
-    private func finalizedTempBasal(endedAt: Date) -> [NewPumpEvent] {
+    func finalizedTempBasal(endedAt: Date) -> [NewPumpEvent] {
         guard state.basalDose.type == .tempBasal else {
             return []
         }
