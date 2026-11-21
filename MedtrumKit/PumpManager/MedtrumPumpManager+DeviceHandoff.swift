@@ -157,6 +157,12 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
         }
     }
 
+    /// Connect for each command or status read instead of keeping the link open; Trio on Apple Watch sets it.
+    /// Patch alarms then show at the next contact, at most a loop cycle later.
+    public func setConnectsOnDemand(_ onDemand: Bool) {
+        bluetooth?.setConnectsOnDemand(onDemand)
+    }
+
     public var isControlReady: Bool {
         guard !state.controlReleased, let bluetooth else {
             return false

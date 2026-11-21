@@ -19,6 +19,40 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
     private var reconnectAttempts = 0
     private var reconnectTask: Task<Void, Never>?
 
+    /// Connect for each command or status read, and drop the link once idle, instead of keeping it open. On
+    /// Apple Watch the open link's status updates (one every ~8 s) wake the app in the background until watchOS
+    /// starts cutting all of its Bluetooth links. Read and written on `managerQueue`.
+    private var connectsOnDemand = false
+    private var idleDisconnect: DispatchWorkItem?
+    static let idleLinkTimeout: TimeInterval = 5
+
+    func setConnectsOnDemand(_ onDemand: Bool) {
+        managerQueue.async {
+            self.connectsOnDemand = onDemand
+            if onDemand { self.scheduleIdleDisconnect() }
+        }
+    }
+
+    /// On demand: drops the link `idleLinkTimeout` after the last connect or write, unless a bolus is running.
+    /// Must be called on `managerQueue`.
+    private func scheduleIdleDisconnect() {
+        idleDisconnect?.cancel()
+        guard connectsOnDemand else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.connectsOnDemand, self.attempt == nil,
+                  let peripheral = self.peripheral, peripheral.state != .disconnected
+            else { return }
+            if self.pumpManager?.state.bolusState != .noBolus {
+                self.scheduleIdleDisconnect()
+                return
+            }
+            self.logger.info("On demand: dropping the idle link")
+            self.manager.cancelPeripheralConnection(peripheral)
+        }
+        idleDisconnect = work
+        managerQueue.asyncAfter(deadline: .now() + Self.idleLinkTimeout, execute: work)
+    }
+
     // MUST NOT be called from within managerQueue - deadlock
     public var isConnected: Bool {
         managerQueue.sync { isConnectedOnQueue }
@@ -153,6 +187,7 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
             reconnectTask?.cancel()
             reconnectTask = nil
             rememberPeripheral()
+            scheduleIdleDisconnect()
         } else {
             scheduleReconnect()
         }
@@ -173,7 +208,7 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
 
     /// Must be called on `managerQueue`.
     private func scheduleReconnect() {
-        guard mayConnect else {
+        guard mayConnect, !connectsOnDemand else {
             return
         }
 
@@ -388,7 +423,9 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
             return .failure(error: .noManager)
         }
 
-        return peripheralManager.writePacket(packet)
+        let result = peripheralManager.writePacket(packet)
+        managerQueue.async { self.scheduleIdleDisconnect() }
+        return result
     }
 
     func disconnect(force: Bool = false) {
@@ -502,7 +539,7 @@ extension BluetoothManager {
             return
         }
 
-        if !isConnectedOnQueue, pumpManager?.state.pumpState.isRunning == true {
+        if !isConnectedOnQueue, !connectsOnDemand, pumpManager?.state.pumpState.isRunning == true {
             ensureConnectedOnQueue { error in
                 if let error = error {
                     self.logger.error("Failed to auto reconnect on boot: \(error)")
