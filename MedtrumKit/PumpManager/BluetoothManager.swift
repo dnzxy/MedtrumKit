@@ -46,12 +46,12 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
     private let identifierAtLaunch: UUID?
     private let releasedAtLaunch: Bool
 
-    /// Released to another controller, or refusing after one used the patch: connect to nothing.
+    /// Released to another controller: connect to nothing.
     private var mayConnect: Bool {
         guard let state = pumpManager?.state else {
             return !releasedAtLaunch
         }
-        return !state.controlReleased && !state.refusesSessions
+        return !state.controlReleased
     }
 
     init(knownPeripheralIdentifier: UUID?, released: Bool = false) {

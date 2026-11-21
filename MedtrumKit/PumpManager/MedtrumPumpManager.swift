@@ -413,7 +413,6 @@ public extension MedtrumPumpManager {
                 return
             }
 
-            self.noteOwnDeliveryCommand()
 
             let writeResult = self.bluetooth.write(SetBolusPacket(bolusAmount: units))
             if case let .failure(error) = writeResult {
@@ -464,7 +463,6 @@ public extension MedtrumPumpManager {
                 return
             }
 
-            self.noteOwnDeliveryCommand()
 
             let result = self.bluetooth.write(CancelBolusPacket())
             if case let .failure(error) = result {
@@ -534,7 +532,6 @@ public extension MedtrumPumpManager {
 
             if self.state.basalState == .tempBasal {
                 // Need to cancel temp basal first before setting temp basal
-                self.noteOwnDeliveryCommand()
                 let cancelResult = self.bluetooth.write(CancelTempBasalPacket())
                 if case let .failure(error) = cancelResult {
                     self.log.error("Failed to cancel temp basal: \(error.localizedDescription)")
@@ -556,7 +553,6 @@ public extension MedtrumPumpManager {
             }
 
             let packet = SetTempBasalPacket(rate: unitsPerHour, duration: duration)
-            self.noteOwnDeliveryCommand()
             let tempBasalResult = self.bluetooth.write(packet)
 
             if case let .failure(error) = tempBasalResult {
@@ -625,7 +621,6 @@ public extension MedtrumPumpManager {
                 return
             }
 
-            self.noteOwnDeliveryCommand()
 
             let result = self.bluetooth.write(SuspendPumpPacket(duration: duration))
             if case let .failure(error) = result {
@@ -662,7 +657,6 @@ public extension MedtrumPumpManager {
                 return
             }
 
-            self.noteOwnDeliveryCommand()
 
             let response = self.bluetooth.write(ResumePumpPacket())
             if case let .failure(error) = response {
@@ -711,7 +705,6 @@ public extension MedtrumPumpManager {
 
             let schedule = BasalSchedule(entries: items)
             let packet = SetBasalProfilePacket(basalProfile: schedule.toData())
-            self.noteOwnDeliveryCommand()
             let result = self.bluetooth.write(packet)
 
             if case let .failure(error) = result {
@@ -851,7 +844,6 @@ public extension MedtrumPumpManager {
                 currentTDD: 0,
                 basalProfile: self.state.basalSchedule.toData()
             )
-            self.noteOwnDeliveryCommand()
             let result = self.bluetooth.write(packet)
             switch result {
             case let .failure(error):
@@ -1073,7 +1065,6 @@ public extension MedtrumPumpManager {
                 return
             }
 
-            self.noteOwnDeliveryCommand()
 
             let resumeResult = self.bluetooth.write(ResumePumpPacket())
             if case let .failure(error) = resumeResult {

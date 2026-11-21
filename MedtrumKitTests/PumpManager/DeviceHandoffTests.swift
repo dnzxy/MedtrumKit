@@ -22,10 +22,6 @@ final class DeviceHandoffTests: XCTestCase {
         return state
     }
 
-    private func basal(_ type: BasalType, sequence: Double) -> BasalData {
-        BasalData(type: type, sequence: sequence, patchId: 256, startTime: Date.now, rate: 1, delivery: 0)
-    }
-
     // MARK: Export and adopt
 
     func testExportLeavesOutTheHandleAndThisControllersFlags() throws {
@@ -97,69 +93,25 @@ final class DeviceHandoffTests: XCTestCase {
     func testTakeAfterAReleaseStartsFresh() {
         let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
         manager.releaseControl()
-        manager.state.lastSeenBasalSequence = 7
         manager.takeControl()
 
         XCTAssertFalse(manager.isControlReleased)
-        XCTAssertNil(manager.state.lastSeenBasalSequence)
         XCTAssertEqual(manager.state.basalDose.type, .basal)
         XCTAssertNil(manager.state.bolusDose)
     }
 
-    // MARK: Another controller's deliveries
+    // MARK: Another controller
 
-    func testATempBasalWeDidNotCommandStopsThisController() {
-        let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
-        manager.state.sharedWithAnotherController = true
+    func testTheKitNeverRefusesThePatchOnItsOwn() {
+        // a refusal saved by an earlier build doesn't stop this one
+        var raw = activeState().rawValue
+        raw["refusesSessions"] = true
+        raw["foreignSessionDetectedAt"] = Date.now
+        let manager = MedtrumPumpManager(state: MedtrumPumpState(rawValue: raw), withBluetooth: false)
 
-        // the first status after a take only sets the baseline
-        manager.noteObservedDelivery(basal: basal(.ABSOLUTE_TEMP, sequence: 10), bolus: nil)
-        XCTAssertNil(manager.foreignSessionDetectedAt)
-
-        manager.noteObservedDelivery(basal: basal(.ABSOLUTE_TEMP, sequence: 11), bolus: nil)
-        XCTAssertNotNil(manager.foreignSessionDetectedAt)
-        XCTAssertTrue(manager.refusesSessions)
-
-        manager.takeControlLiftingRefusal()
         XCTAssertFalse(manager.refusesSessions)
         XCTAssertNil(manager.foreignSessionDetectedAt)
-    }
-
-    func testOurOwnTempBasalIsNotAnotherController() {
-        let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
-        manager.state.sharedWithAnotherController = true
-        manager.noteObservedDelivery(basal: basal(.STANDARD, sequence: 10), bolus: nil)
-
-        manager.noteOwnDeliveryCommand()
-        manager.noteObservedDelivery(basal: basal(.ABSOLUTE_TEMP, sequence: 11), bolus: nil)
-        XCTAssertNil(manager.foreignSessionDetectedAt)
-    }
-
-    func testWhileSupersedingAnotherControllerIsNotedButDoesNotStopUs() {
-        let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
-        manager.releaseControl()
-        manager.takeControl(supersedingAnotherControllerUntil: Date.now.addingTimeInterval(.hours(1)))
-        manager.noteObservedDelivery(basal: basal(.STANDARD, sequence: 10), bolus: nil)
-
-        manager.noteObservedDelivery(basal: basal(.ABSOLUTE_TEMP, sequence: 11), bolus: nil)
-        XCTAssertNotNil(manager.foreignSessionDetectedAt)
-        XCTAssertFalse(manager.refusesSessions)
-    }
-
-    func testABolusWeDidNotStartStopsThisController() {
-        let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
-        manager.state.sharedWithAnotherController = true
-        manager.noteObservedDelivery(basal: basal(.STANDARD, sequence: 10), bolus: nil)
-
-        manager.noteObservedDelivery(basal: nil, bolus: BolusData(type: 0, completed: false, delivered: 0.5))
-        XCTAssertTrue(manager.refusesSessions)
-    }
-
-    func testAPatchNeverSharedIsNotChecked() {
-        let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
-        manager.noteObservedDelivery(basal: basal(.STANDARD, sequence: 10), bolus: nil)
-        manager.noteObservedDelivery(basal: basal(.ABSOLUTE_TEMP, sequence: 11), bolus: nil)
-        XCTAssertNil(manager.foreignSessionDetectedAt)
+        XCTAssertNil(manager.rawState["refusesSessions"])
     }
 
     // MARK: Odometer

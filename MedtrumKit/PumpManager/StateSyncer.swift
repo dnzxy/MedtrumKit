@@ -138,8 +138,6 @@ enum StateSyncer {
             }
         }
 
-        pumpManager.noteObservedDelivery(basal: syncResponse.basal, bolus: syncResponse.bolus)
-
         if let prime = syncResponse.primeProgress {
             state.primeProgress = prime
         }

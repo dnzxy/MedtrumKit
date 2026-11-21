@@ -7,6 +7,10 @@ import LoopKit
 // Bluetooth link at a time. So the releasing side drops its link and stops reconnecting, and the
 // adopting side connects with the exported state. Each side books only the doses it commanded:
 // the open basal dose is closed at the release and started fresh at a take or an adopt.
+//
+// The patch doesn't say which controller started a delivery, and reports basal records only every
+// few minutes, so the kit doesn't try to detect another controller: it never refuses the patch on
+// its own. The host's delivered-total audit at each hand-back is the check.
 
 // MARK: - Configuration sharing
 
@@ -20,11 +24,7 @@ extension MedtrumPumpManager: DeviceConfigurationSharing {
         let shared = MedtrumPumpState(rawValue: state.rawValue)
         shared.peripheralIdentifier = nil
         shared.controlReleased = false
-        shared.refusesSessions = false
-        shared.foreignSessionDetectedAt = nil
         shared.supersedingUntil = nil
-        shared.lastOwnDeliveryCommandAt = nil
-        shared.lastSeenBasalSequence = nil
         shared.bolusDose = nil
 
         return SharedDeviceConfiguration(
@@ -117,12 +117,10 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
         take(supersedingUntil: nil, liftingRefusal: false)
     }
 
-    /// Until `until`, deliveries by another controller are noted but don't stop this one: it may not have heard yet.
     public func takeControl(supersedingAnotherControllerUntil until: Date?) {
         take(supersedingUntil: until, liftingRefusal: until != nil)
     }
 
-    /// The user chose this device after another one used the patch.
     public func takeControlLiftingRefusal() {
         take(supersedingUntil: nil, liftingRefusal: true)
     }
@@ -134,15 +132,6 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
 
     private func take(supersedingUntil until: Date?, liftingRefusal: Bool) {
         let wasReleased = state.controlReleased
-        if liftingRefusal {
-            state.refusesSessions = false
-            state.foreignSessionDetectedAt = nil
-        }
-        guard !state.refusesSessions else {
-            log.warning("Take refused: another controller used the patch")
-            return
-        }
-
         state.supersedingUntil = until
         if wasReleased || liftingRefusal {
             // the other controller booked its own doses; start ours from now
@@ -152,8 +141,6 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
                 startDate: Date.now
             )
             state.bolusDose = nil
-            state.lastSeenBasalSequence = nil
-            state.foreignSessionDetectedAt = nil
         }
         state.controlReleased = false
         notifyStateDidChange()
@@ -171,7 +158,7 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
     }
 
     public var isControlReady: Bool {
-        guard !state.controlReleased, !state.refusesSessions, let bluetooth else {
+        guard !state.controlReleased, let bluetooth else {
             return false
         }
         return bluetooth.isConnected
@@ -183,12 +170,13 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
         return handle(in: localState, forPumpSN: pumpSN) == nil
     }
 
+    /// Never: see the note at the top of this file.
     public var refusesSessions: Bool {
-        state.refusesSessions
+        false
     }
 
     public var foreignSessionDetectedAt: Date? {
-        state.foreignSessionDetectedAt
+        nil
     }
 
     public var deliveryStartedAt: Date? {
@@ -197,57 +185,6 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
 
     public var deliveryEndsAt: Date? {
         state.patchExpiresAt
-    }
-}
-
-// MARK: - Another controller's deliveries
-
-extension MedtrumPumpManager {
-    /// A temp basal or bolus seen this soon after one of our own delivery commands is taken as ours.
-    static let ownCommandWindow: TimeInterval = .minutes(2)
-
-    func noteOwnDeliveryCommand() {
-        state.lastOwnDeliveryCommandAt = Date.now
-    }
-
-    /// Called for each status from the patch. Only on a patch shared with another controller. The first
-    /// status after a take or an adopt sets the baseline and is never counted.
-    func noteObservedDelivery(basal: BasalData?, bolus: BolusData?) {
-        guard state.sharedWithAnotherController, !state.controlReleased else {
-            return
-        }
-
-        let now = Date.now
-        let ownCommandRecently = state.lastOwnDeliveryCommandAt.map { now.timeIntervalSince($0) < Self.ownCommandWindow } ?? false
-        let hasBaseline = state.lastSeenBasalSequence != nil
-        var foreign = false
-
-        if let basal {
-            if let last = state.lastSeenBasalSequence, basal.sequence != last, basal.type.isTemp, !ownCommandRecently {
-                foreign = true
-            }
-            state.lastSeenBasalSequence = basal.sequence
-        }
-        if hasBaseline, let bolus, !bolus.completed, bolus.delivered > 0, state.bolusDose == nil, !ownCommandRecently {
-            foreign = true
-        }
-
-        guard foreign else {
-            return
-        }
-
-        if state.foreignSessionDetectedAt == nil {
-            state.foreignSessionDetectedAt = now
-            log.warning("Another controller delivered insulin on this patch")
-        }
-        if let until = state.supersedingUntil, until > now {
-            return
-        }
-        if !state.refusesSessions {
-            state.refusesSessions = true
-            log.warning("Refusing the patch until the user chooses this device again")
-            bluetooth?.disconnectForRelease()
-        }
     }
 }
 
@@ -294,7 +231,7 @@ extension MedtrumPumpManager: PumpDeliveryOdometer {
 
     /// Reads the status if it is older than `age`.
     public func readStatusIfOlder(than age: TimeInterval, completion: @escaping (Date?) -> Void) {
-        guard !state.controlReleased, !state.refusesSessions, Date.now.timeIntervalSince(state.lastSync) > age else {
+        guard !state.controlReleased, Date.now.timeIntervalSince(state.lastSync) > age else {
             completion(state.lastSync)
             return
         }

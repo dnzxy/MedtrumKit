@@ -73,10 +73,6 @@ public class MedtrumPumpState: RawRepresentable {
         controlReleased = rawValue["controlReleased"] as? Bool ?? false
         sharedWithAnotherController = rawValue["sharedWithAnotherController"] as? Bool ?? false
         supersedingUntil = rawValue["supersedingUntil"] as? Date
-        refusesSessions = rawValue["refusesSessions"] as? Bool ?? false
-        foreignSessionDetectedAt = rawValue["foreignSessionDetectedAt"] as? Date
-        lastOwnDeliveryCommandAt = rawValue["lastOwnDeliveryCommandAt"] as? Date
-        lastSeenBasalSequence = rawValue["lastSeenBasalSequence"] as? Double
 
         if let expiryModeRaw = rawValue["expiryMode"] as? ExpiryMode.RawValue {
             expiryMode = ExpiryMode(rawValue: expiryModeRaw) ?? .default
@@ -214,10 +210,6 @@ public class MedtrumPumpState: RawRepresentable {
         value["controlReleased"] = controlReleased
         value["sharedWithAnotherController"] = sharedWithAnotherController
         value["supersedingUntil"] = supersedingUntil
-        value["refusesSessions"] = refusesSessions
-        value["foreignSessionDetectedAt"] = foreignSessionDetectedAt
-        value["lastOwnDeliveryCommandAt"] = lastOwnDeliveryCommandAt
-        value["lastSeenBasalSequence"] = lastSeenBasalSequence
 
         if let previousPatch = previousPatch {
             do {
@@ -235,10 +227,6 @@ public class MedtrumPumpState: RawRepresentable {
     public var controlReleased = false
     public var sharedWithAnotherController = false
     public var supersedingUntil: Date?
-    public var refusesSessions = false
-    public var foreignSessionDetectedAt: Date?
-    public var lastOwnDeliveryCommandAt: Date?
-    public var lastSeenBasalSequence: Double?
     public var insulinType: InsulinType?
     public var lastSync: Date
     public var pumpSN: Data {
