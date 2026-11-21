@@ -1,7 +1,9 @@
 import CoreBluetooth
 import HealthKit
 import LoopKit
-import UIKit
+#if os(iOS)
+    import UIKit
+#endif
 
 public class MedtrumPumpManager: DeviceManager {
     public let pluginIdentifier = "Medtrum"
@@ -48,18 +50,20 @@ public class MedtrumPumpManager: DeviceManager {
         bluetooth = BluetoothManager(knownPeripheralIdentifier: state.peripheralIdentifier)
         refreshLogDeviceIdentifier()
 
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(appMovedToBackground),
-            name: UIApplication.didEnterBackgroundNotification,
-            object: nil
-        )
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(appMovedToForeground),
-            name: UIApplication.willEnterForegroundNotification,
-            object: nil
-        )
+        #if os(iOS)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appMovedToBackground),
+                name: UIApplication.didEnterBackgroundNotification,
+                object: nil
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(appMovedToForeground),
+                name: UIApplication.willEnterForegroundNotification,
+                object: nil
+            )
+        #endif
 
         bluetooth.pumpManager = self
         MedtrumLogger.pumpManager = self
@@ -222,17 +226,19 @@ public class MedtrumPumpManager: DeviceManager {
         }
     }
 
-    private let backgroundTask = BackgroundTask()
-    @objc func appMovedToBackground() {
-        if state.useSilentTones {
-            log.info("Starting silent tones")
-            backgroundTask.startBackgroundTask()
+    #if os(iOS)
+        private let backgroundTask = BackgroundTask()
+        @objc func appMovedToBackground() {
+            if state.useSilentTones {
+                log.info("Starting silent tones")
+                backgroundTask.startBackgroundTask()
+            }
         }
-    }
 
-    @objc func appMovedToForeground() {
-        backgroundTask.stopBackgroundTask()
-    }
+        @objc func appMovedToForeground() {
+            backgroundTask.stopBackgroundTask()
+        }
+    #endif
 }
 
 public extension MedtrumPumpManager {
