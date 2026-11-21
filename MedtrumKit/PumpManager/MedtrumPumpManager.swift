@@ -282,12 +282,16 @@ public extension MedtrumPumpManager {
     func ensureCurrentPumpData(completion: ((Date?) -> Void)?) {
         let age = Date.now.timeIntervalSince(state.lastSync)
 
-        guard let activatedAt = state.patchActivatedAt,
-              age > Self.loopSyncFreshnessInterval ||
-              Date.now.timeIntervalSince(activatedAt) < .minutes(4)
-        else {
-            log.info("Skipping status update -> data is fresh or not active: \(Int(age)) sec")
+        guard let activatedAt = state.patchActivatedAt else {
+            log.info("Skipping status update -> patch not active")
             completion?(nil)
+            return
+        }
+
+        guard age > Self.loopSyncFreshnessInterval || Date.now.timeIntervalSince(activatedAt) < .minutes(4) else {
+            // LoopKit asks for the last sync here, not nil: a caller that checks it took nil as no contact
+            log.info("Skipping status update -> data is fresh: \(Int(age)) sec")
+            completion?(state.lastSync)
             return
         }
 

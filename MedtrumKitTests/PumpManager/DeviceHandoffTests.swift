@@ -124,6 +124,20 @@ final class DeviceHandoffTests: XCTestCase {
         XCTAssertTrue(MedtrumPumpState(rawValue: raw).controlReleased, "a real hand-off stays released")
     }
 
+    // MARK: Pump data
+
+    func testFreshDataReportsTheLastSyncNotNil() {
+        let state = activeState()
+        state.lastSync = Date.now.addingTimeInterval(-30)
+        let manager = MedtrumPumpManager(state: state, withBluetooth: false)
+        let reported = expectation(description: "completion")
+        manager.ensureCurrentPumpData { lastSync in
+            XCTAssertEqual(lastSync, state.lastSync)
+            reported.fulfill()
+        }
+        wait(for: [reported], timeout: 1)
+    }
+
     // MARK: Odometer
 
     func testDeliveredUnitsAreTheReservoirUsedInWholePulses() throws {
