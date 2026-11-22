@@ -14,7 +14,8 @@ import LoopKit
 // (`foreignDeliveryEvidence`). It is checked at each connection, before any command of our own, on
 // the patch's own start times, not on when its records arrive. So that a controller that would dose
 // nothing still leaves a mark the other can find, a shared patch always runs a temp basal: at the
-// scheduled rate when nothing else runs (`keepControlMarked`). After loopandlearn/MedtrumKit#6.
+// scheduled rate when nothing else runs (`keepControlMarked`). The detection follows @EJM0's
+// "Stand aside when another controller has run the patch", EJM0/MedtrumKit 326eaa4, in loopandlearn/MedtrumKit#6.
 
 // MARK: - Configuration sharing
 

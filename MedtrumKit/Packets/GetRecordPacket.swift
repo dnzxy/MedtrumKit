@@ -14,7 +14,7 @@ struct GetRecordPacketResponse {
 }
 
 /// One record of the patch's history, by its sequence number. Layout from AndroidAPS' Medtrum driver
-/// (GetRecordPacket.kt), as loopandlearn/MedtrumKit#6 ports it.
+/// (GetRecordPacket.kt), as @EJM0 ports it in EJM0/MedtrumKit 326eaa4 (loopandlearn/MedtrumKit#6).
 class GetRecordPacket: MedtrumBasePacket, MedtrumBasePacketProtocol {
     typealias T = GetRecordPacketResponse
 
