@@ -157,6 +157,9 @@ enum StateSyncer {
             if !state.patchSessionEnded || (syncResponse.state.isRunning && patchId != state.previousPatch?.patchId) {
                 state.patchId = patchId
             }
+            if patchId == state.patchId {
+                state.latestRecordSequence = UInt64(storage.sequence)
+            }
         }
 
         if let bolusProgress = syncResponse.bolus {
@@ -175,6 +178,10 @@ enum StateSyncer {
         }
 
         pumpManager.notifyStateDidChange()
+
+        if fullSync, !syncResponse.invalidPayload {
+            pumpManager.keepControlMarked()
+        }
     }
 
     private static func recordSuspendIfDelivering(

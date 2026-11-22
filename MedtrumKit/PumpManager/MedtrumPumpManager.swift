@@ -30,6 +30,41 @@ public class MedtrumPumpManager: DeviceManager {
         state.rawValue
     }
 
+    /// Held from a temp basal command's check of what the patch runs to its write, so a mark of control
+    /// (`keepControlMarked`) never replaces the host's temp basal
+    let deliveryCommandLock = NSLock()
+    /// When a mark of control was last tried; at most one runs at a time
+    private let markLock = NSLock()
+    private var markAttemptedAt: Date?
+    private var markRunning = false
+    private var markHeldUntil: Date?
+    static let markRetryInterval: TimeInterval = 60
+    /// After the host cancels a temp basal: it wants none for now, and a hand-off releases right after its cancel
+    static let markHoldAfterCancel: TimeInterval = .minutes(2)
+
+    func holdMark() {
+        markLock.withLock { markHeldUntil = Date.now.addingTimeInterval(Self.markHoldAfterCancel) }
+    }
+
+    /// True if a mark is running or was just tried; otherwise claims the next one
+    func markIsBusy() -> Bool {
+        markLock.withLock {
+            let now = Date.now
+            if markRunning || markAttemptedAt.map({ now.timeIntervalSince($0) < Self.markRetryInterval }) == true ||
+                markHeldUntil.map({ now < $0 }) == true
+            {
+                return true
+            }
+            markRunning = true
+            markAttemptedAt = .now
+            return false
+        }
+    }
+
+    func markDone() {
+        markLock.withLock { markRunning = false }
+    }
+
     private let logDeviceIdentifierLock = NSLock()
     private var logDeviceIdentifierStorage = ""
 
@@ -49,7 +84,7 @@ public class MedtrumPumpManager: DeviceManager {
         self.state = state
         oldState = MedtrumPumpState(rawValue: state.rawValue)
         if withBluetooth {
-            bluetooth = BluetoothManager(knownPeripheralIdentifier: state.peripheralIdentifier, released: state.controlReleased)
+            bluetooth = BluetoothManager(knownPeripheralIdentifier: state.peripheralIdentifier, released: state.controlReleased || state.refusesAfterForeignDelivery)
         }
         refreshLogDeviceIdentifier()
 
@@ -417,10 +452,11 @@ public extension MedtrumPumpManager {
                 return
             }
 
-
+            let sentAt = Date.now
             let writeResult = self.bluetooth.write(SetBolusPacket(bolusAmount: units))
             if case let .failure(error) = writeResult {
                 self.log.error("Failed to write: \(error.localizedDescription)")
+                self.noteUnansweredDeliveryCommand(sentAt: sentAt)
                 self.resetBolusState()
 
                 completion(.communication(error))
@@ -534,62 +570,76 @@ public extension MedtrumPumpManager {
                 return
             }
 
-            if self.state.basalState == .tempBasal {
-                // Need to cancel temp basal first before setting temp basal
-                let cancelResult = self.bluetooth.write(CancelTempBasalPacket())
-                if case let .failure(error) = cancelResult {
-                    self.log.error("Failed to cancel temp basal: \(error.localizedDescription)")
-                    completion(.communication(error))
-                    return
-                }
-
-                self.state.basalState = .active
-                self.log.info("Cancelled temp basal!")
-            }
-
-            if duration < .ulpOfOne {
-                // Need to cancel temp basal, but is already cancelled
-                // Only need to report back to algorithm
-                self.reportScheduledBasal()
-
-                completion(nil)
-                return
-            }
-
-            let packet = SetTempBasalPacket(rate: unitsPerHour, duration: duration)
-            let tempBasalResult = self.bluetooth.write(packet)
-
-            if case let .failure(error) = tempBasalResult {
-                self.log.error("Failed to set temp basal: \(error.localizedDescription)")
-
-                // the cancel already succeeded, but new TBR failed - the patch is running the scheduled basal now
-                self.reportScheduledBasal()
-
-                completion(.communication(error))
-                return
-            }
-
-            self.log.info("Set temp basal!")
-
-            let tempBasalDose = UnfinalizedDose(
-                decisionId: decisionId,
-                tempRate: unitsPerHour,
-                duration: duration,
-                insulinType: self.state.insulinType,
-                automatic: automatic
-            )
-            var events = self.finalizedTempBasal(endedAt: Date.now)
-            events.append(NewPumpEvent.tempBasal(dose: tempBasalDose.toDoseEntry(isMutable: true)))
-
-            self.state.basalDose = tempBasalDose
-            self.state.basalState = .tempBasal
-            self.state.lastSync = Date.now
-            self.notifyStateDidChange()
-
-            self.emitPumpEvents(events)
-
-            completion(nil)
+            self.deliveryCommandLock.lock()
+            let result = self.writeTempBasal(decisionId: decisionId, unitsPerHour: unitsPerHour, duration: duration, automatic: automatic)
+            self.deliveryCommandLock.unlock()
+            completion(result)
         }
+    }
+
+    /// The writes of a temp basal command, on a connected patch; `deliveryCommandLock` is held
+    private func writeTempBasal(
+        decisionId: UUID?,
+        unitsPerHour: Double,
+        duration: TimeInterval,
+        automatic: Bool
+    ) -> LoopKit.PumpManagerError? {
+        if state.basalState == .tempBasal {
+            // Need to cancel temp basal first before setting temp basal
+            let cancelResult = bluetooth.write(CancelTempBasalPacket())
+            if case let .failure(error) = cancelResult {
+                log.error("Failed to cancel temp basal: \(error.localizedDescription)")
+                return .communication(error)
+            }
+
+            state.basalState = .active
+            log.info("Cancelled temp basal!")
+        }
+
+        if duration < .ulpOfOne {
+            // Need to cancel temp basal, but is already cancelled
+            // Only need to report back to algorithm
+            holdMark()
+            reportScheduledBasal()
+            return nil
+        }
+
+        let packet = SetTempBasalPacket(rate: unitsPerHour, duration: duration)
+        let sentAt = Date.now
+        let tempBasalResult = bluetooth.write(packet)
+
+        if case let .failure(error) = tempBasalResult {
+            log.error("Failed to set temp basal: \(error.localizedDescription)")
+            noteUnansweredDeliveryCommand(sentAt: sentAt)
+
+            // the cancel already succeeded, but new TBR failed - the patch is running the scheduled basal now
+            reportScheduledBasal()
+            return .communication(error)
+        }
+
+        log.info("Set temp basal!")
+        bookTempBasal(decisionId: decisionId, unitsPerHour: unitsPerHour, duration: duration, automatic: automatic)
+        return nil
+    }
+
+    /// Books a temp basal the patch confirmed, ending the one before
+    func bookTempBasal(decisionId: UUID?, unitsPerHour: Double, duration: TimeInterval, automatic: Bool) {
+        let tempBasalDose = UnfinalizedDose(
+            decisionId: decisionId,
+            tempRate: unitsPerHour,
+            duration: duration,
+            insulinType: state.insulinType,
+            automatic: automatic
+        )
+        var events = finalizedTempBasal(endedAt: Date.now)
+        events.append(NewPumpEvent.tempBasal(dose: tempBasalDose.toDoseEntry(isMutable: true)))
+
+        state.basalDose = tempBasalDose
+        state.basalState = .tempBasal
+        state.lastSync = Date.now
+        notifyStateDidChange()
+
+        emitPumpEvents(events)
     }
 
     private func reportScheduledBasal() {
@@ -991,6 +1041,12 @@ public extension MedtrumPumpManager {
 
         state.patchSessionEnded = false
         state.initialReservoir = nil
+        // a new patch was never handed to another controller
+        state.sharedWithAnotherController = false
+        state.refusesAfterForeignDelivery = false
+        state.foreignDeliveryDetectedAt = nil
+        state.expectsForeignDelivery = false
+        state.unansweredDeliveryCommandAt = nil
         state.patchId = patchId
         state.patchActivatedAt = activatedAt
         state.lastSync = Date.now

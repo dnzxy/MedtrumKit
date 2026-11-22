@@ -102,8 +102,7 @@ final class DeviceHandoffTests: XCTestCase {
 
     // MARK: Another controller
 
-    func testTheKitNeverRefusesThePatchOnItsOwn() {
-        // a refusal saved by an earlier build doesn't stop this one
+    func testARefusalSavedByTheEarlierBuildIsIgnored() {
         var raw = activeState().rawValue
         raw["refusesSessions"] = true
         raw["foreignSessionDetectedAt"] = Date.now
@@ -112,6 +111,178 @@ final class DeviceHandoffTests: XCTestCase {
         XCTAssertFalse(manager.refusesSessions)
         XCTAssertNil(manager.foreignSessionDetectedAt)
         XCTAssertNil(manager.rawState["refusesSessions"])
+    }
+
+    private func sharedState(lastContact: Date) -> MedtrumPumpState {
+        let state = activeState()
+        state.sharedWithAnotherController = true
+        state.lastContactAt = lastContact
+        state.pumpTime = Date.now
+        state.pumpTimeSyncedAt = Date.now
+        return state
+    }
+
+    private func temp(startedAt: Date) -> BasalData {
+        BasalData(type: .ABSOLUTE_TEMP, sequence: 5, patchId: 256, startTime: startedAt, rate: 0.8, delivery: 0)
+    }
+
+    private func bolusRecord(startedAt: Date) -> GetRecordPacketResponse {
+        GetRecordPacketResponse(
+            isValid: true, recordType: 1, sequence: 0,
+            bolus: BolusRecord(startedAt: startedAt, amount: 2, delivered: 2)
+        )
+    }
+
+    private let noRecords: (UInt64) -> GetRecordPacketResponse? = { _ in nil }
+
+    func testATempBasalStartedAfterOurLastContactIsAnotherControllers() {
+        let contact = Date.now.addingTimeInterval(-.minutes(10))
+        let state = sharedState(lastContact: contact)
+
+        XCTAssertNotNil(state.foreignDeliveryEvidence(
+            since: contact, previousSequence: nil, basal: temp(startedAt: contact.addingTimeInterval(60)), readRecord: noRecords
+        ))
+    }
+
+    func testOurOwnTempBasalReportedLateIsOurs() {
+        // the 21 November false alarm: our temp began before the answer that moved our last contact
+        let contact = Date.now.addingTimeInterval(-.minutes(1))
+        let state = sharedState(lastContact: contact)
+
+        XCTAssertNil(state.foreignDeliveryEvidence(
+            since: contact, previousSequence: nil, basal: temp(startedAt: contact.addingTimeInterval(-1)), readRecord: noRecords
+        ))
+    }
+
+    func testThePatchClockOffsetIsAllowedFor() {
+        let contact = Date.now.addingTimeInterval(-.minutes(10))
+        let state = sharedState(lastContact: contact)
+        // the patch's clock runs 2 minutes ahead
+        state.pumpTime = Date.now.addingTimeInterval(.minutes(2))
+
+        XCTAssertNil(state.foreignDeliveryEvidence(
+            since: contact, previousSequence: nil, basal: temp(startedAt: contact.addingTimeInterval(.minutes(2) - 1)),
+            readRecord: noRecords
+        ))
+    }
+
+    func testAnUnansweredCommandOfOursIsNotAnotherControllers() {
+        let contact = Date.now.addingTimeInterval(-.minutes(10))
+        let state = sharedState(lastContact: contact)
+        let sentAt = contact.addingTimeInterval(20)
+        state.unansweredDeliveryCommandAt = sentAt
+
+        XCTAssertNil(state.foreignDeliveryEvidence(
+            since: contact, previousSequence: nil, basal: temp(startedAt: sentAt.addingTimeInterval(2)), readRecord: noRecords
+        ))
+        XCTAssertNil(state.unansweredDeliveryCommandAt, "used up")
+        // a later start is not that command
+        state.unansweredDeliveryCommandAt = sentAt
+        XCTAssertNotNil(state.foreignDeliveryEvidence(
+            since: contact, previousSequence: nil, basal: temp(startedAt: sentAt.addingTimeInterval(.minutes(5))),
+            readRecord: noRecords
+        ))
+    }
+
+    func testTheConnectionAfterATakeOrAnAdoptIsNotChecked() {
+        let contact = Date.now.addingTimeInterval(-.minutes(10))
+        let state = sharedState(lastContact: contact)
+        state.expectsForeignDelivery = true
+        let foreign = temp(startedAt: contact.addingTimeInterval(60))
+
+        XCTAssertNil(state.foreignDeliveryEvidence(since: contact, previousSequence: nil, basal: foreign, readRecord: noRecords))
+        XCTAssertNotNil(state.foreignDeliveryEvidence(since: contact, previousSequence: nil, basal: foreign, readRecord: noRecords))
+    }
+
+    func testAPatchNeverSharedIsNotChecked() {
+        let contact = Date.now.addingTimeInterval(-.minutes(10))
+        let state = sharedState(lastContact: contact)
+        state.sharedWithAnotherController = false
+
+        XCTAssertNil(state.foreignDeliveryEvidence(
+            since: contact, previousSequence: nil, basal: temp(startedAt: contact.addingTimeInterval(60)), readRecord: noRecords
+        ))
+    }
+
+    func testABolusInTheNewHistoryRecordsIsFound() {
+        let contact = Date.now.addingTimeInterval(-.minutes(10))
+        let state = sharedState(lastContact: contact)
+        state.latestRecordSequence = 20
+        var read: [UInt64] = []
+
+        let evidence = state.foreignDeliveryEvidence(since: contact, previousSequence: 17, basal: nil) { index in
+            read.append(index)
+            return index == 18 ? self.bolusRecord(startedAt: contact.addingTimeInterval(120)) : nil
+        }
+        XCTAssertNotNil(evidence)
+        XCTAssertEqual(read, [20, 19, 18], "only the records new since our last connection, newest first")
+
+        // ours, from before our last contact
+        state.latestRecordSequence = 21
+        XCTAssertNil(state.foreignDeliveryEvidence(since: contact, previousSequence: 20, basal: nil) { _ in
+            self.bolusRecord(startedAt: contact.addingTimeInterval(-30))
+        })
+    }
+
+    func testFoundDeliveryStopsThisControllerUntilALiftingTake() {
+        let manager = MedtrumPumpManager(state: sharedState(lastContact: Date.now), withBluetooth: false)
+
+        XCTAssertTrue(manager.foreignDeliveryFound("test"))
+        XCTAssertTrue(manager.refusesSessions)
+        XCTAssertNotNil(manager.foreignSessionDetectedAt)
+        XCTAssertFalse(manager.isControlReady)
+        XCTAssertTrue(MedtrumPumpState(rawValue: manager.rawState).refusesAfterForeignDelivery)
+
+        manager.takeControl()
+        XCTAssertTrue(manager.refusesSessions, "a plain take stays refused")
+
+        manager.takeControlLiftingRefusal()
+        XCTAssertFalse(manager.refusesSessions)
+        XCTAssertNil(manager.foreignSessionDetectedAt)
+        XCTAssertTrue(manager.state.expectsForeignDelivery)
+    }
+
+    func testWhileSupersedingFoundDeliveryIsOnlyReported() {
+        let manager = MedtrumPumpManager(state: sharedState(lastContact: Date.now), withBluetooth: false)
+        manager.takeControl(supersedingAnotherControllerUntil: Date.now.addingTimeInterval(.hours(1)))
+        XCTAssertTrue(manager.state.expectsForeignDelivery)
+
+        XCTAssertFalse(manager.foreignDeliveryFound("test"))
+        XCTAssertFalse(manager.refusesSessions)
+        XCTAssertNotNil(manager.foreignSessionDetectedAt)
+
+        manager.stopSupersedingAnotherController()
+        XCTAssertTrue(manager.foreignDeliveryFound("test"))
+        XCTAssertTrue(manager.refusesSessions)
+    }
+
+    func testAnAdoptExpectsTheExportersDeliveryAndTheExportCarriesNoTrust() throws {
+        let exporter = MedtrumPumpManager(state: sharedState(lastContact: Date.now), withBluetooth: false)
+        exporter.state.foreignDeliveryDetectedAt = Date.now
+        exporter.state.unansweredDeliveryCommandAt = Date.now
+        let export = exporter.exportConfiguration()
+        let shared = MedtrumPumpState(rawValue: export.state)
+        XCTAssertNil(shared.lastContactAt)
+        XCTAssertNil(shared.foreignDeliveryDetectedAt)
+        XCTAssertNil(shared.unansweredDeliveryCommandAt)
+
+        let adopted = try XCTUnwrap(MedtrumPumpManager.adoptedState(from: export, localState: nil))
+        XCTAssertTrue(adopted.expectsForeignDelivery)
+    }
+
+    func testTheMarkEndsAtTheNextScheduleChange() {
+        let state = activeState()
+        state.basalSchedule = BasalSchedule(entries: [
+            RepeatingScheduleValue(startTime: 0, value: 1.0),
+            RepeatingScheduleValue(startTime: .hours(3), value: 0.8)
+        ])
+        let manager = MedtrumPumpManager(state: state, withBluetooth: false)
+        let midnight = Calendar.current.startOfDay(for: Date.now)
+
+        XCTAssertEqual(manager.markDurationNow(at: midnight.addingTimeInterval(.hours(1))), .minutes(30))
+        XCTAssertEqual(manager.markDurationNow(at: midnight.addingTimeInterval(.hours(3) - .minutes(10) - 20)), .minutes(10))
+        XCTAssertNil(manager.markDurationNow(at: midnight.addingTimeInterval(.hours(3) - .minutes(3))))
+        XCTAssertEqual(manager.markDurationNow(at: midnight.addingTimeInterval(.hours(23) + .minutes(50))), .minutes(10))
     }
 
     func testAReleaseThatCameWithTheOldRefusalIsUndone() {
