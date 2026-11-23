@@ -584,7 +584,8 @@ public extension MedtrumPumpManager {
         duration: TimeInterval,
         automatic: Bool
     ) -> LoopKit.PumpManagerError? {
-        if state.basalState == .tempBasal {
+        let cancelFirst = state.basalState == .tempBasal
+        if cancelFirst {
             // Need to cancel temp basal first before setting temp basal
             let cancelResult = bluetooth.write(CancelTempBasalPacket())
             if case let .failure(error) = cancelResult {
@@ -606,7 +607,16 @@ public extension MedtrumPumpManager {
 
         let packet = SetTempBasalPacket(rate: unitsPerHour, duration: duration)
         let sentAt = Date.now
-        let tempBasalResult = bluetooth.write(packet)
+        var tempBasalResult = bluetooth.write(packet)
+
+        if !cancelFirst, case .failure(error: .invalidResponse(code: 8)) = tempBasalResult {
+            // the patch runs a temp basal this state missed
+            log.warning("Temp basal refused in the patch's state; cancelling the one running and trying again")
+            if case .success = bluetooth.write(CancelTempBasalPacket()) {
+                state.basalState = .active
+                tempBasalResult = bluetooth.write(packet)
+            }
+        }
 
         if case let .failure(error) = tempBasalResult {
             log.error("Failed to set temp basal: \(error.localizedDescription)")
