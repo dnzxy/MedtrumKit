@@ -34,7 +34,9 @@ extension MedtrumPumpManager: DeviceConfigurationSharing {
         shared.refusesAfterForeignDelivery = false
         shared.foreignDeliveryDetectedAt = nil
         shared.expectsForeignDelivery = false
-        shared.lastContactAt = nil
+        // after a release the adopter checks its first connection from the release on: what started since is another's
+        shared.lastContactAt = state.controlReleased ? state.releasedAt : nil
+        shared.releasedAt = nil
         shared.unansweredDeliveryCommandAt = nil
         shared.deliveryUncertainSince = nil
         shared.bolusDose = nil
@@ -62,8 +64,8 @@ extension MedtrumPumpManager: DeviceConfigurationSharing {
         state.controlReleased = false
         state.sharedWithAnotherController = true
         state.borrowed = true
-        // the first connection meets the exporter's delivery
-        state.expectsForeignDelivery = true
+        // the first connection meets the exporter's delivery; from a release on, it is checked as any other
+        state.expectsForeignDelivery = state.lastContactAt == nil
         state.basalDose = UnfinalizedDose(
             basalRate: state.currentBaseBasalRate,
             insulinType: state.insulinType,
@@ -121,6 +123,7 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
         }
         state.basalDose = UnfinalizedDose(basalRate: state.currentBaseBasalRate, insulinType: state.insulinType, startDate: now)
         state.controlReleased = true
+        state.releasedAt = now
         state.sharedWithAnotherController = true
         state.supersedingUntil = nil
         notifyStateDidChange()

@@ -287,6 +287,32 @@ final class DeviceHandoffTests: XCTestCase {
         XCTAssertTrue(adopted.expectsForeignDelivery)
     }
 
+    func testAnAdoptAfterAReleaseChecksItsFirstConnectionFromTheRelease() throws {
+        let exporter = MedtrumPumpManager(state: sharedState(lastContact: Date.now.addingTimeInterval(-60)), withBluetooth: false)
+        exporter.releaseControl()
+        let releasedAt = try XCTUnwrap(exporter.state.releasedAt)
+        let adopted = try XCTUnwrap(MedtrumPumpManager.adoptedState(from: exporter.exportConfiguration(), localState: nil))
+        XCTAssertEqual(adopted.lastContactAt, releasedAt)
+        XCTAssertFalse(adopted.expectsForeignDelivery)
+        XCTAssertTrue(adopted.borrowed)
+
+        // the exporter took the patch back before this adopt first connected: its new temp basal stops the adopter
+        let first = adopted.foreignDeliveryEvidence(
+            since: adopted.lastContactAt,
+            previousSequence: nil,
+            basal: temp(startedAt: releasedAt.addingTimeInterval(.minutes(2))),
+            readRecord: noRecords
+        )
+        XCTAssertNotNil(first)
+        // what ran from before the release is the exporter's, expected
+        XCTAssertNil(adopted.foreignDeliveryEvidence(
+            since: releasedAt,
+            previousSequence: nil,
+            basal: temp(startedAt: releasedAt.addingTimeInterval(-.minutes(10))),
+            readRecord: noRecords
+        ))
+    }
+
     func testTheMarkRunsOnlyWhileTheOtherControllerMayBeActive() {
         func manager(_ configure: (MedtrumPumpState) -> Void) -> MedtrumPumpManager {
             let state = activeState()

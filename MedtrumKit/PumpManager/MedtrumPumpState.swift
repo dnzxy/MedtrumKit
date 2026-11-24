@@ -78,6 +78,7 @@ public class MedtrumPumpState: RawRepresentable {
         sharedWithAnotherController = rawValue["sharedWithAnotherController"] as? Bool ?? false
         supersedingUntil = rawValue["supersedingUntil"] as? Date
         borrowed = rawValue["borrowed"] as? Bool ?? false
+        releasedAt = rawValue["releasedAt"] as? Date
         refusesAfterForeignDelivery = rawValue["refusesAfterForeignDelivery"] as? Bool ?? false
         foreignDeliveryDetectedAt = rawValue["foreignDeliveryDetectedAt"] as? Date
         expectsForeignDelivery = rawValue["expectsForeignDelivery"] as? Bool ?? false
@@ -223,6 +224,7 @@ public class MedtrumPumpState: RawRepresentable {
         value["sharedWithAnotherController"] = sharedWithAnotherController
         value["supersedingUntil"] = supersedingUntil
         value["borrowed"] = borrowed
+        value["releasedAt"] = releasedAt
         value["refusesAfterForeignDelivery"] = refusesAfterForeignDelivery
         value["foreignDeliveryDetectedAt"] = foreignDeliveryDetectedAt
         value["expectsForeignDelivery"] = expectsForeignDelivery
@@ -249,6 +251,8 @@ public class MedtrumPumpState: RawRepresentable {
     public var supersedingUntil: Date?
     /// This controller adopted the patch from another one, which takes it back
     public var borrowed = false
+    /// When this controller let go of the patch; an export made after it bounds what the adopter takes as expected
+    public var releasedAt: Date?
     /// While a superseding take's scope runs: the superseded controller may still be active
     var isSuperseding: Bool {
         supersedingUntil.map { $0 > Date.now } ?? false
