@@ -209,6 +209,20 @@ final class DeviceHandoffTests: XCTestCase {
         ))
     }
 
+    func testAnEndedPatchSessionLetsTheNextPatchConnect() {
+        // the 23 November dead end: refused after a false alarm, the new patch's priming could not connect
+        let manager = MedtrumPumpManager(state: sharedState(lastContact: Date.now), withBluetooth: false)
+        XCTAssertTrue(manager.foreignDeliveryFound("test"))
+        manager.state.controlReleased = true
+
+        manager.state.endHandoff()
+
+        XCTAssertFalse(manager.refusesSessions)
+        XCTAssertFalse(manager.state.controlReleased)
+        XCTAssertFalse(manager.state.sharedWithAnotherController)
+        XCTAssertNil(manager.foreignSessionDetectedAt)
+    }
+
     func testThePatchClockOffsetIsAllowedFor() {
         let contact = Date.now.addingTimeInterval(-.minutes(10))
         let state = sharedState(lastContact: contact)

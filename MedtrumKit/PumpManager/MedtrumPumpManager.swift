@@ -1104,6 +1104,7 @@ public extension MedtrumPumpManager {
         state.patchSessionEnded = true
         state.lastSync = Date.now
         state.basalState = .suspended
+        state.endHandoff()
         notifyStateDidChange()
 
         emitPumpEvents(events)

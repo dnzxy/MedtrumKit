@@ -299,6 +299,18 @@ extension MedtrumPumpState {
         return nil
     }
 
+    /// The patch session ended: its hand-off and any refusal go with it, so the next patch's priming can connect.
+    func endHandoff() {
+        sharedWithAnotherController = false
+        controlReleased = false
+        releasedAt = nil
+        borrowed = false
+        supersedingUntil = nil
+        refusesAfterForeignDelivery = false
+        foreignDeliveryDetectedAt = nil
+        expectsForeignDelivery = false
+    }
+
     /// At a basal schedule boundary the patch writes the temp basal it runs again, with the boundary as its start
     /// (seen at 23:00 and 00:00). It is ours when it has our temp's rate and ours was still running then.
     func isRestampOfOurTemp(_ basal: BasalData, at start: Date, slack: TimeInterval) -> Bool {
