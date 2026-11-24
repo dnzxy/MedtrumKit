@@ -13,8 +13,8 @@ import LoopKit
 // start anything: delivery that began after this controller last heard the patch is another one's
 // (`foreignDeliveryEvidence`). It is checked at each connection, before any command of our own, on
 // the patch's own start times, not on when its records arrive. So that a controller that would dose
-// nothing still leaves a mark the other can find, a shared patch always runs a temp basal: at the
-// scheduled rate when nothing else runs (`keepControlMarked`). The detection follows @EJM0's
+// nothing still leaves a mark the other can find, a shared patch runs a temp basal while the other may be
+// active: at the scheduled rate when nothing else runs (`keepControlMarked`). The detection follows @EJM0's
 // "Stand aside when another controller has run the patch", EJM0/MedtrumKit 326eaa4, in loopandlearn/MedtrumKit#6.
 
 // MARK: - Configuration sharing
@@ -30,6 +30,7 @@ extension MedtrumPumpManager: DeviceConfigurationSharing {
         shared.peripheralIdentifier = nil
         shared.controlReleased = false
         shared.supersedingUntil = nil
+        shared.borrowed = false
         shared.refusesAfterForeignDelivery = false
         shared.foreignDeliveryDetectedAt = nil
         shared.expectsForeignDelivery = false
@@ -60,6 +61,7 @@ extension MedtrumPumpManager: DeviceConfigurationSharing {
         state.peripheralIdentifier = handle(in: localState, forPumpSN: state.pumpSN)
         state.controlReleased = false
         state.sharedWithAnotherController = true
+        state.borrowed = true
         // the first connection meets the exporter's delivery
         state.expectsForeignDelivery = true
         state.basalDose = UnfinalizedDose(
@@ -350,11 +352,11 @@ extension MedtrumPumpManager {
     /// The shortest mark worth setting before the schedule changes rate
     static let shortestMark: TimeInterval = .minutes(5)
 
-    /// On a patch shared with another controller, a temp basal at the scheduled rate whenever none of ours runs, so
-    /// the other controller always finds delivery it didn't start, even when this one's host doses nothing. It ends
-    /// at the next change of the schedule, so it delivers exactly the scheduled basal. A temp basal the patch runs
-    /// that isn't ours (the superseded controller's, after a take) is replaced. Runs after full syncs; never on a
-    /// patch released, refused, suspended or bolusing, and never over a temp basal of ours.
+    /// While the other controller may still be active - this one borrowed the patch, or supersedes the other - a temp
+    /// basal at the scheduled rate whenever none runs, so the other controller always finds delivery it didn't start,
+    /// even when this one's host doses nothing. It ends at the next change of the schedule, so it delivers exactly the
+    /// scheduled basal. Runs after full syncs; never on a patch released, refused, suspended or bolusing, and never
+    /// over a running temp basal: that is the host's to change.
     func keepControlMarked() {
         guard mayMarkControl(), markDurationNow() != nil, !markIsBusy() else {
             return
@@ -375,13 +377,9 @@ extension MedtrumPumpManager {
                 return
             }
 
-            if self.state.basalState == .tempBasal {
-                // another controller's temp basal, or one of ours whose answer was lost: ours from now
-                if case let .failure(error) = self.bluetooth.write(CancelTempBasalPacket()) {
-                    self.log.warning("Marking control: cancelling the temp basal running failed: \(error.localizedDescription)")
-                    return
-                }
-                self.state.basalState = .active
+            guard self.state.basalState != .tempBasal else {
+                // another controller's temp basal, or one of ours whose answer was lost: the host's loop replaces it
+                return
             }
 
             let rate = self.state.currentBaseBasalRate
@@ -397,8 +395,9 @@ extension MedtrumPumpManager {
         }
     }
 
-    private func mayMarkControl() -> Bool {
-        state.sharedWithAnotherController && !state.controlReleased && !state.refusesAfterForeignDelivery &&
+    func mayMarkControl() -> Bool {
+        state.sharedWithAnotherController && (state.borrowed || state.isSuperseding) &&
+            !state.controlReleased && !state.refusesAfterForeignDelivery &&
             !state.patchSessionEnded && (state.pumpState == .active || state.pumpState == .active_alt) &&
             state.basalState != .suspended && (state.basalDose.type == .basal || state.basalDose.type == .resume) &&
             state.bolusState == .noBolus && state.currentBaseBasalRate > 0

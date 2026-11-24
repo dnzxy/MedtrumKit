@@ -287,6 +287,21 @@ final class DeviceHandoffTests: XCTestCase {
         XCTAssertTrue(adopted.expectsForeignDelivery)
     }
 
+    func testTheMarkRunsOnlyWhileTheOtherControllerMayBeActive() {
+        func manager(_ configure: (MedtrumPumpState) -> Void) -> MedtrumPumpManager {
+            let state = activeState()
+            state.basalSchedule = BasalSchedule(entries: [RepeatingScheduleValue(startTime: 0, value: 1.0)])
+            state.sharedWithAnotherController = true
+            configure(state)
+            return MedtrumPumpManager(state: state, withBluetooth: false)
+        }
+        XCTAssertFalse(manager { _ in }.mayMarkControl(), "taken back after an acknowledged hand-back: no mark")
+        XCTAssertTrue(manager { $0.borrowed = true }.mayMarkControl())
+        XCTAssertTrue(manager { $0.supersedingUntil = Date.now.addingTimeInterval(.hours(1)) }.mayMarkControl())
+        XCTAssertFalse(manager { $0.supersedingUntil = Date.now.addingTimeInterval(-60) }.mayMarkControl(), "the scope ended")
+        XCTAssertFalse(manager { $0.sharedWithAnotherController = false; $0.borrowed = true }.mayMarkControl())
+    }
+
     func testTheMarkEndsAtTheNextScheduleChange() {
         let state = activeState()
         state.basalSchedule = BasalSchedule(entries: [

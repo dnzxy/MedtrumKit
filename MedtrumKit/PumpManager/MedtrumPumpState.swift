@@ -77,6 +77,7 @@ public class MedtrumPumpState: RawRepresentable {
         }
         sharedWithAnotherController = rawValue["sharedWithAnotherController"] as? Bool ?? false
         supersedingUntil = rawValue["supersedingUntil"] as? Date
+        borrowed = rawValue["borrowed"] as? Bool ?? false
         refusesAfterForeignDelivery = rawValue["refusesAfterForeignDelivery"] as? Bool ?? false
         foreignDeliveryDetectedAt = rawValue["foreignDeliveryDetectedAt"] as? Date
         expectsForeignDelivery = rawValue["expectsForeignDelivery"] as? Bool ?? false
@@ -221,6 +222,7 @@ public class MedtrumPumpState: RawRepresentable {
         value["controlReleased"] = controlReleased
         value["sharedWithAnotherController"] = sharedWithAnotherController
         value["supersedingUntil"] = supersedingUntil
+        value["borrowed"] = borrowed
         value["refusesAfterForeignDelivery"] = refusesAfterForeignDelivery
         value["foreignDeliveryDetectedAt"] = foreignDeliveryDetectedAt
         value["expectsForeignDelivery"] = expectsForeignDelivery
@@ -245,6 +247,12 @@ public class MedtrumPumpState: RawRepresentable {
     public var controlReleased = false
     public var sharedWithAnotherController = false
     public var supersedingUntil: Date?
+    /// This controller adopted the patch from another one, which takes it back
+    public var borrowed = false
+    /// While a superseding take's scope runs: the superseded controller may still be active
+    var isSuperseding: Bool {
+        supersedingUntil.map { $0 > Date.now } ?? false
+    }
 
     // Detecting another controller (MedtrumPumpManager+DeviceHandoff, `foreignDeliveryEvidence`)
     /// Another controller ran the patch outside a superseding take: this one connects to nothing until a lifting take.

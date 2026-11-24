@@ -43,6 +43,8 @@ public class MedtrumPumpManager: DeviceManager {
     static let markHoldAfterCancel: TimeInterval = .minutes(2)
 
     func holdMark() {
+        // a superseding take releases nothing after its cancel: the superseded controller has to find its mark
+        guard !state.isSuperseding else { return }
         markLock.withLock { markHeldUntil = Date.now.addingTimeInterval(Self.markHoldAfterCancel) }
     }
 
