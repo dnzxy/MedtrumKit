@@ -38,4 +38,20 @@ final class StaleSyncTests: XCTestCase {
         noStorage.storage = nil
         XCTAssertFalse(StateSyncer.answeredBeforeKnownRecord(syncResponse: noStorage, state: makeState(latest: 632)))
     }
+
+    func testANewPatchStartsItsRecordCountAfresh() {
+        let state = makeState(latest: 632)
+        state.lastContactAt = Date()
+        state.patchId = UInt64(203).toData(length: 4)
+        XCTAssertNil(state.latestRecordSequence)
+        XCTAssertNil(state.lastContactAt)
+        XCTAssertFalse(StateSyncer.answeredBeforeKnownRecord(
+            syncResponse: makeResponse(sequence: 3, patchId: 203),
+            state: state
+        ), "the new patch's first records are current")
+
+        state.latestRecordSequence = 5
+        state.patchId = UInt64(203).toData(length: 4)
+        XCTAssertEqual(state.latestRecordSequence, 5, "the same id again keeps the count")
+    }
 }

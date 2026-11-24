@@ -279,7 +279,15 @@ public class MedtrumPumpState: RawRepresentable {
     // Patch specific data
     public var sessionToken: Data
     public var backupSessionToken: Data
-    public var patchId: Data
+    public var patchId: Data {
+        didSet {
+            guard patchId != oldValue else { return }
+            // record numbers and contact times belong to one patch: a new patch counts from the start
+            latestRecordSequence = nil
+            lastContactAt = nil
+            unansweredDeliveryCommandAt = nil
+        }
+    }
 
     /// The CoreBluetooth identifier of the pump base we are paired with - the base carries the
     /// radio, so this survives a patch change. iOS keeps it stable, which lets us get a
