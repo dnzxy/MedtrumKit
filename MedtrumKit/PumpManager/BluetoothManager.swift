@@ -24,6 +24,8 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
     /// starts cutting all of its Bluetooth links. Read and written on `managerQueue`.
     private var connectsOnDemand = false
     private var idleDisconnect: DispatchWorkItem?
+    /// Writes waiting for their answer: the idle drop never cuts one. Changed on `managerQueue` only.
+    private var writesInFlight = 0
     static let idleLinkTimeout: TimeInterval = 5
 
     func setConnectsOnDemand(_ onDemand: Bool) {
@@ -39,7 +41,7 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
         idleDisconnect?.cancel()
         guard connectsOnDemand else { return }
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.connectsOnDemand, self.attempt == nil,
+            guard let self, self.connectsOnDemand, self.attempt == nil, self.writesInFlight == 0,
                   let peripheral = self.peripheral, peripheral.state != .disconnected
             else { return }
             if self.pumpManager?.state.bolusState != .noBolus {
@@ -419,12 +421,21 @@ class BluetoothManager: NSObject, CBCentralManagerDelegate {
     func write(_ packet: any MedtrumBasePacketProtocol) -> MedtrumWriteResult<Any> {
         // Only the lookup is serialised. writePacket blocks for up to 30s waiting for a response
         // that is delivered on managerQueue, so it must not be holding the queue while it waits.
-        guard let peripheralManager = managerQueue.sync(execute: { self.peripheralManager }) else {
+        let peripheralManager: PeripheralManager? = managerQueue.sync {
+            guard let peripheralManager = self.peripheralManager else { return nil }
+            self.writesInFlight += 1
+            self.idleDisconnect?.cancel()
+            return peripheralManager
+        }
+        guard let peripheralManager else {
             return .failure(error: .noManager)
         }
 
         let result = peripheralManager.writePacket(packet)
-        managerQueue.async { self.scheduleIdleDisconnect() }
+        managerQueue.async {
+            self.writesInFlight -= 1
+            self.scheduleIdleDisconnect()
+        }
         return result
     }
 
