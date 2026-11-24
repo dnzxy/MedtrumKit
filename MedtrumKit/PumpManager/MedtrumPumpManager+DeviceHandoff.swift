@@ -35,6 +35,7 @@ extension MedtrumPumpManager: DeviceConfigurationSharing {
         shared.expectsForeignDelivery = false
         shared.lastContactAt = nil
         shared.unansweredDeliveryCommandAt = nil
+        shared.deliveryUncertainSince = nil
         shared.bolusDose = nil
 
         return SharedDeviceConfiguration(
@@ -100,6 +101,10 @@ extension MedtrumPumpManager: ExclusiveDeviceControl {
         }
         guard state.bolusState == .noBolus else {
             log.warning("Release refused: a bolus is running")
+            return
+        }
+        guard state.deliveryUncertainSince == nil else {
+            log.warning("Release refused: a command's delivery is unconfirmed")
             return
         }
 
@@ -315,10 +320,24 @@ extension MedtrumPumpManager {
         return true
     }
 
-    /// Notes a temp basal or bolus command that got no answer: the patch may have started it
-    func noteUnansweredDeliveryCommand(sentAt: Date) {
-        guard state.sharedWithAnotherController else { return }
-        state.unansweredDeliveryCommandAt = sentAt
+    /// Notes a temp basal or bolus command that got no answer: the patch may have started it. Delivery is uncertain
+    /// until the next status read. A command the patch refused, or that never left this device, started nothing.
+    func noteUnansweredDeliveryCommand(sentAt: Date, error: MedtrumWriteError) {
+        switch error {
+        case .timeout,
+             .noData,
+             .invalidData:
+            break
+        case .alreadyRunning,
+             .invalidResponse,
+             .noManager,
+             .noWriteCharacteristic:
+            return
+        }
+        state.deliveryUncertainSince = state.deliveryUncertainSince ?? sentAt
+        if state.sharedWithAnotherController {
+            state.unansweredDeliveryCommandAt = sentAt
+        }
         notifyStateDidChange()
     }
 }
@@ -369,7 +388,7 @@ extension MedtrumPumpManager {
             let sentAt = Date.now
             if case let .failure(error) = self.bluetooth.write(SetTempBasalPacket(rate: rate, duration: duration)) {
                 self.log.warning("Marking control failed: \(error.localizedDescription)")
-                self.noteUnansweredDeliveryCommand(sentAt: sentAt)
+                self.noteUnansweredDeliveryCommand(sentAt: sentAt, error: error)
                 return
             }
 

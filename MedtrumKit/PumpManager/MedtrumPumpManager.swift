@@ -310,7 +310,8 @@ public extension MedtrumPumpManager {
             pumpBatteryChargeRemaining: nil, // Patch pumps do not need to report back battery status
             basalDeliveryState: state.basalDeliveryState,
             bolusState: state.bolusDeliveryState,
-            insulinType: state.insulinType
+            insulinType: state.insulinType,
+            deliveryIsUncertain: state.deliveryUncertainSince != nil
         )
     }
 
@@ -456,7 +457,7 @@ public extension MedtrumPumpManager {
             let writeResult = self.bluetooth.write(SetBolusPacket(bolusAmount: units))
             if case let .failure(error) = writeResult {
                 self.log.error("Failed to write: \(error.localizedDescription)")
-                self.noteUnansweredDeliveryCommand(sentAt: sentAt)
+                self.noteUnansweredDeliveryCommand(sentAt: sentAt, error: error)
                 self.resetBolusState()
 
                 completion(.communication(error))
@@ -620,7 +621,7 @@ public extension MedtrumPumpManager {
 
         if case let .failure(error) = tempBasalResult {
             log.error("Failed to set temp basal: \(error.localizedDescription)")
-            noteUnansweredDeliveryCommand(sentAt: sentAt)
+            noteUnansweredDeliveryCommand(sentAt: sentAt, error: error)
 
             // the cancel already succeeded, but new TBR failed - the patch is running the scheduled basal now
             reportScheduledBasal()

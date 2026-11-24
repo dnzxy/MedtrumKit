@@ -83,6 +83,7 @@ public class MedtrumPumpState: RawRepresentable {
         lastContactAt = rawValue["lastContactAt"] as? Date
         latestRecordSequence = rawValue["latestRecordSequence"] as? UInt64
         unansweredDeliveryCommandAt = rawValue["unansweredDeliveryCommandAt"] as? Date
+        deliveryUncertainSince = rawValue["deliveryUncertainSince"] as? Date
 
         if let expiryModeRaw = rawValue["expiryMode"] as? ExpiryMode.RawValue {
             expiryMode = ExpiryMode(rawValue: expiryModeRaw) ?? .default
@@ -226,6 +227,7 @@ public class MedtrumPumpState: RawRepresentable {
         value["lastContactAt"] = lastContactAt
         value["latestRecordSequence"] = latestRecordSequence
         value["unansweredDeliveryCommandAt"] = unansweredDeliveryCommandAt
+        value["deliveryUncertainSince"] = deliveryUncertainSince
 
         if let previousPatch = previousPatch {
             do {
@@ -259,6 +261,8 @@ public class MedtrumPumpState: RawRepresentable {
     public var latestRecordSequence: UInt64?
     /// A temp basal or bolus command whose answer never came: the patch may have started it, after `lastContactAt`
     public var unansweredDeliveryCommandAt: Date?
+    /// A temp basal or bolus command got no answer: until a status read after it, the patch may or may not run it
+    public var deliveryUncertainSince: Date?
 
     public var insulinType: InsulinType?
     public var lastSync: Date
@@ -286,6 +290,7 @@ public class MedtrumPumpState: RawRepresentable {
             latestRecordSequence = nil
             lastContactAt = nil
             unansweredDeliveryCommandAt = nil
+            deliveryUncertainSince = nil
         }
     }
 

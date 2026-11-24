@@ -90,6 +90,23 @@ final class DeviceHandoffTests: XCTestCase {
         XCTAssertEqual(manager.state.peripheralIdentifier, handle)
     }
 
+    func testAnUnansweredCommandMakesDeliveryUncertainAndHoldsTheRelease() {
+        let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
+        manager.noteUnansweredDeliveryCommand(sentAt: .now, error: .invalidResponse(code: 8))
+        XCTAssertFalse(manager.status.deliveryIsUncertain, "a refused command started nothing")
+
+        manager.noteUnansweredDeliveryCommand(sentAt: .now, error: .timeout)
+        XCTAssertTrue(manager.status.deliveryIsUncertain)
+        XCTAssertNil(manager.state.unansweredDeliveryCommandAt, "only a shared patch checks for another controller")
+        manager.releaseControl()
+        XCTAssertFalse(manager.isControlReleased, "only this controller can settle its command")
+        XCTAssertTrue(MedtrumPumpState(rawValue: manager.rawState).deliveryUncertainSince != nil, "kept across a relaunch")
+
+        manager.state.deliveryUncertainSince = nil
+        manager.releaseControl()
+        XCTAssertTrue(manager.isControlReleased)
+    }
+
     func testTakeAfterAReleaseStartsFresh() {
         let manager = MedtrumPumpManager(state: activeState(), withBluetooth: false)
         manager.releaseControl()

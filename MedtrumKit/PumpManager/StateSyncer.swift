@@ -185,6 +185,12 @@ enum StateSyncer {
             pumpManager.emitPumpEvents(events)
         }
 
+        if fullSync, !syncResponse.invalidPayload, !answeredEarlier, let since = state.deliveryUncertainSince, syncDate > since {
+            // the status now shows what the patch runs; the reservoir tells the host what it delivered
+            logger.info("Delivery no longer uncertain: status read after the unanswered command at \(since)")
+            state.deliveryUncertainSince = nil
+        }
+
         pumpManager.notifyStateDidChange()
 
         if fullSync, !syncResponse.invalidPayload {
