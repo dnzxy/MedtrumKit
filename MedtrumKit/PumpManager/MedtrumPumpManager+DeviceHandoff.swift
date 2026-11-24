@@ -239,6 +239,8 @@ extension MedtrumPumpState {
     static let foreignRecordsRead: UInt64 = 8
     /// How long an unanswered command may have taken to reach the patch: the write timeout
     static let unansweredCommandWindow: TimeInterval = 30
+    /// Basal schedule entries start on the half hour
+    static let scheduleSegment: TimeInterval = 30 * 60
 
     /// At a connection's first status, before any command of ours: delivery the patch never starts by itself - a
     /// temp basal, a bolus - that began after this controller last heard the patch (`since`), when only another
@@ -276,7 +278,7 @@ extension MedtrumPumpState {
 
         if let basal, basal.type.isTemp {
             let start = deviceTime(basal.startTime)
-            if start > after, !isOurs(start) {
+            if start > after, !isOurs(start), !isRestampOfOurTemp(basal, at: start, slack: slack) {
                 return "a temp basal of \(basal.rate) U/h started \(start), after this controller's last contact \(since)"
             }
         }
@@ -295,6 +297,20 @@ extension MedtrumPumpState {
             }
         }
         return nil
+    }
+
+    /// At a basal schedule boundary the patch writes the temp basal it runs again, with the boundary as its start
+    /// (seen at 23:00 and 00:00). It is ours when it has our temp's rate and ours was still running then.
+    func isRestampOfOurTemp(_ basal: BasalData, at start: Date, slack: TimeInterval) -> Bool {
+        let localPatchTime = basal.startTime.timeIntervalSince1970 +
+            TimeInterval(TimeZone.current.secondsFromGMT(for: basal.startTime))
+        guard localPatchTime.truncatingRemainder(dividingBy: Self.scheduleSegment) == 0,
+              basalDose.type == .tempBasal, abs(basalDose.value - basal.rate) < 0.01
+        else {
+            return false
+        }
+        return start >= basalDose.startDate.addingTimeInterval(-slack) &&
+            start <= basalDose.estimatedEndDate.addingTimeInterval(slack)
     }
 }
 

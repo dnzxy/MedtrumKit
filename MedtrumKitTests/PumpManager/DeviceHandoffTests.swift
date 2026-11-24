@@ -171,6 +171,44 @@ final class DeviceHandoffTests: XCTestCase {
         ))
     }
 
+    /// The second whole local hour from now
+    private var scheduleBoundary: Date {
+        let offset = TimeInterval(TimeZone.current.secondsFromGMT())
+        let local = Date.now.timeIntervalSince1970 + offset
+        return Date(timeIntervalSince1970: (local / 3600).rounded(.down) * 3600 + 2 * 3600 - offset)
+    }
+
+    func testOurTempBasalRestampedAtAScheduleBoundaryIsOurs() {
+        // the 23 November false alarm: the patch wrote our running 0 U/h temp again at 23:00
+        let state = sharedState(lastContact: Date.now)
+        state.basalDose = UnfinalizedDose(decisionId: nil, tempRate: 0.8, duration: .hours(3), insulinType: nil, automatic: true)
+
+        XCTAssertNil(state.foreignDeliveryEvidence(
+            since: Date.now, previousSequence: nil, basal: temp(startedAt: scheduleBoundary), readRecord: noRecords
+        ))
+    }
+
+    func testARestampNotMatchingOurTempIsAnotherControllers() {
+        let state = sharedState(lastContact: Date.now)
+
+        // another rate
+        state.basalDose = UnfinalizedDose(decisionId: nil, tempRate: 1.2, duration: .hours(3), insulinType: nil, automatic: true)
+        XCTAssertNotNil(state.foreignDeliveryEvidence(
+            since: Date.now, previousSequence: nil, basal: temp(startedAt: scheduleBoundary), readRecord: noRecords
+        ))
+        // our temp had ended
+        state.basalDose = UnfinalizedDose(decisionId: nil, tempRate: 0.8, duration: .minutes(30), insulinType: nil, automatic: true)
+        XCTAssertNotNil(state.foreignDeliveryEvidence(
+            since: Date.now, previousSequence: nil, basal: temp(startedAt: scheduleBoundary), readRecord: noRecords
+        ))
+        // not on a boundary
+        state.basalDose = UnfinalizedDose(decisionId: nil, tempRate: 0.8, duration: .hours(3), insulinType: nil, automatic: true)
+        XCTAssertNotNil(state.foreignDeliveryEvidence(
+            since: Date.now, previousSequence: nil, basal: temp(startedAt: scheduleBoundary.addingTimeInterval(60)),
+            readRecord: noRecords
+        ))
+    }
+
     func testThePatchClockOffsetIsAllowedFor() {
         let contact = Date.now.addingTimeInterval(-.minutes(10))
         let state = sharedState(lastContact: contact)
